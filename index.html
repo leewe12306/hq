@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>300308 盘口</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}
+body{background:#f2f3f5;padding:10px;font-size:13px}
+.card{background:#fff;border-radius:10px;padding:14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+h2{text-align:center;font-size:16px;margin-bottom:12px;color:#1d2129}
+table{width:100%;border-collapse:collapse}
+td,th{padding:7px 4px;text-align:center;border:1px solid #f0f0f0;font-size:12px}
+th{background:#fafafa;color:#666;font-weight:500}
+.red{color:#f53f3f;font-weight:700}
+.green{color:#00b42a;font-weight:700}
+.ask{color:#f53f3f}
+.bid{color:#00b42a}
+#status{font-size:11px;color:#999;text-align:center;margin-top:8px;padding:4px}
+.btn{width:100%;padding:10px;background:#1677ff;border:none;border-radius:8px;color:#fff;font-size:14px;cursor:pointer;margin-top:4px}
+.btn:active{background:#0958d9}
+#errBox{display:none;background:#fff7e6;border:1px solid #ffd591;border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;color:#874d00;line-height:1.8}
+</style>
+</head>
+<body>
+
+<div id="errBox"></div>
+
+<div class="card">
+  <h2>中际旭创 <span style="font-size:12px;color:#999">300308.SZ</span></h2>
+  <div id="loading" style="text-align:center;padding:20px;color:#999">加载中...</div>
+  <div id="mainData" style="display:none">
+    <table>
+      <tr><th>现价</th><th>涨跌</th><th>涨跌幅</th><th>换手率</th></tr>
+      <tr>
+        <td><span id="price" class="red" style="font-size:18px">--</span></td>
+        <td><span id="chg" class="red">--</span></td>
+        <td><span id="pct" class="red">--</span></td>
+        <td><span id="turn">--</span></td>
+      </tr>
+    </table>
+    <table style="margin-top:6px">
+      <tr><th>今开</th><th>昨收</th><th>最高</th><th>最低</th></tr>
+      <tr>
+        <td id="open">--</td><td id="pre">--</td>
+        <td class="red" id="high">--</td><td class="green" id="low">--</td>
+      </tr>
+      <tr><th>成交量(万手)</th><th>成交额(亿)</th><th>外盘(万手)</th><th>内盘(万手)</th></tr>
+      <tr>
+        <td id="vol">--</td><td id="amt">--</td>
+        <td id="outer">--</td><td id="inner">--</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<div class="card" id="depthCard" style="display:none">
+  <h2 style="font-size:14px;margin-bottom:8px">买卖五档</h2>
+  <table>
+    <tr>
+      <th style="color:#f53f3f">卖出价</th>
+      <th style="color:#f53f3f">挂单(手)</th>
+      <th style="color:#00b42a">买入价</th>
+      <th style="color:#00b42a">挂单(手)</th>
+    </tr>
+    <tr><td class="ask" id="a5p">--</td><td id="a5v">--</td><td class="bid" id="b5p">--</td><td id="b5v">--</td></tr>
+    <tr><td class="ask" id="a4p">--</td><td id="a4v">--</td><td class="bid" id="b4p">--</td><td id="b4v">--</td></tr>
+    <tr><td class="ask" id="a3p">--</td><td id="a3v">--</td><td class="bid" id="b3p">--</td><td id="b3v">--</td></tr>
+    <tr><td class="ask" id="a2p">--</td><td id="a2v">--</td><td class="bid" id="b2p">--</td><td id="b2v">--</td></tr>
+    <tr><td class="ask" id="a1p">--</td><td id="a1v">--</td><td class="bid" id="b1p">--</td><td id="b1v">--</td></tr>
+  </table>
+</div>
+
+<button class="btn" onclick="refresh()">🔄 手动刷新</button>
+<p id="status">等待数据...</p>
+
+<script>
+let retryCount = 0;
+
+window.emCb = function(res) {
+  try {
+    const d = res.data;
+    if (!d || d.f43 === undefined) throw new Error('空数据');
+    const p = v => (v/100).toFixed(2);
+    const isUp = d.f169 >= 0;
+    set('price', p(d.f43), isUp?'red':'green');
+    set('chg',   (isUp?'+':'')+(d.f169/100).toFixed(2), isUp?'red':'green');
+    set('pct',   (isUp?'+':'')+(d.f170/100).toFixed(2)+'%', isUp?'red':'green');
+    set('open',  p(d.f46));
+    set('pre',   p(d.f60));
+    set('high',  p(d.f44));
+    set('low',   p(d.f45));
+    set('vol',   (d.f47/10000).toFixed(2));
+    set('amt',   (d.f48/1e10).toFixed(2));
+    set('turn',  '--');
+    set('outer', '--');
+    set('inner', '--');
+
+    const bids=[[d.f19,d.f20],[d.f17,d.f18],[d.f15,d.f16],[d.f13,d.f14],[d.f11,d.f12]];
+    const asks=[[d.f31,d.f32],[d.f33,d.f34],[d.f35,d.f36],[d.f37,d.f38],[d.f39,d.f40]];
+    [1,2,3,4,5].forEach(i=>{
+      document.getElementById('b'+i+'p').innerText = p(bids[i-1][0]);
+      document.getElementById('b'+i+'v').innerText = bids[i-1][1];
+      document.getElementById('a'+i+'p').innerText = p(asks[i-1][0]);
+      document.getElementById('a'+i+'v').innerText = asks[i-1][1];
+    });
+    showData('东方财富');
+    retryCount = 0;
+  } catch(e) {
+    tryTencent();
+  }
+};
+
+function tryTencent() {
+  const s = document.createElement('script');
+  s.src = 'https://qt.gtimg.cn/q=sz300308&_='+Date.now();
+  s.onload = () => {
+    try {
+      const raw = window['v_sz300308'];
+      if (!raw) throw new Error('无数据');
+      const a = raw.split('~');
+      const isUp = parseFloat(a[31]) >= 0;
+      set('price', a[3], isUp?'red':'green');
+      set('chg',   a[31], isUp?'red':'green');
+      set('pct',   a[32]+'%', isUp?'red':'green');
+      set('open',  a[5]);
+      set('pre',   a[4]);
+      set('high',  a[33]);
+      set('low',   a[34]);
+      set('vol',   (parseInt(a[6])/10000).toFixed(2));
+      set('amt',   (parseFloat(a[37])/1e8).toFixed(2));
+      set('turn',  a[38]+'%');
+      set('outer', (parseInt(a[7])/10000).toFixed(1));
+      set('inner', (parseInt(a[8])/10000).toFixed(1));
+      [1,2,3,4,5].forEach(i=>{
+        document.getElementById('b'+i+'p').innerText = a[9+i-1]||'--';
+        document.getElementById('b'+i+'v').innerText = a[36+i-1]||'--';
+        document.getElementById('a'+i+'p').innerText = a[14+i-1]||'--';
+        document.getElementById('a'+i+'v').innerText = a[41+i-1]||'--';
+      });
+      showData('腾讯');
+      retryCount = 0;
+    } catch(e) {
+      onError();
+    }
+    s.remove();
+  };
+  s.onerror = ()=>{ onError(); s.remove(); };
+  document.head.appendChild(s);
+}
+
+function fetchEM() {
+  const old = document.getElementById('emScript');
+  if (old) old.remove();
+  const s = document.createElement('script');
+  s.id = 'emScript';
+  s.src = 'https://push2.eastmoney.com/api/qt/stock/get?secid=0.300308' +
+    '&fields=f43,f44,f45,f46,f47,f48,f60,f169,f170,f11,f12,f13,f14,f15,f16,f17,f18,f19,f20,f31,f32,f33,f34,f35,f36,f37,f38,f39,f40' +
+    '&cb=emCb&_='+Date.now();
+  s.onerror = ()=>{ tryTencent(); s.remove(); };
+  document.head.appendChild(s);
+}
+
+function set(id, val, cls) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerText = val;
+  if (cls) el.className = cls;
+}
+
+function showData(source) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('mainData').style.display = 'block';
+  document.getElementById('depthCard').style.display = 'block';
+  document.getElementById('errBox').style.display = 'none';
+  const now = new Date().toLocaleTimeString('zh-CN');
+  document.getElementById('status').innerText = `更新: ${now} · ${source} · 10秒刷新`;
+}
+
+function onError() {
+  retryCount++;
+  document.getElementById('loading').innerText = '加载失败';
+  const e = document.getElementById('errBox');
+  e.style.display = 'block';
+  e.innerHTML = `⚠️ 数据加载失败（第${retryCount}次）<br>请确认：① 已关闭VPN ② 非周末非节假日`;
+  document.getElementById('status').innerText = '失败，10秒后重试...';
+}
+
+function refresh() {
+  document.getElementById('status').innerText = '刷新中...';
+  fetchEM();
+}
+
+fetchEM();
+setInterval(fetchEM, 10000);
+</script>
+</body>
+</html>
