@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>板块资金流向</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#fff;color:#333;font-family:system-ui,-apple-system,sans-serif;font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.topbar{padding:7px 12px;background:#fff;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.title-date{font-size:15px;font-weight:700;color:#c0392b}
+.topbar-sub{font-size:10px;color:#999;margin-top:1px}
+.topbar-right{display:flex;align-items:center;gap:6px}
+.btn{padding:4px 10px;border:1px solid #ddd;border-radius:4px;background:#f5f5f5;color:#555;font-size:11px;cursor:pointer;white-space:nowrap}
+.btn:active{background:#e0e0e0}
+/* 分组Tab */
+.grouptabs{display:flex;gap:0;border-bottom:1px solid #eee;flex-shrink:0;overflow-x:auto;background:#fafafa}
+.grouptab{padding:6px 12px;font-size:11px;color:#888;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;flex-shrink:0}
+.grouptab.active{color:#c0392b;border-bottom-color:#c0392b;font-weight:600}
+.main{flex:1;display:flex;overflow:hidden;min-height:0}
+.chart-col{flex:1;position:relative;overflow:hidden;background:#fff}
+canvas{position:absolute;top:0;left:0;width:100%;height:100%}
+.sidebar{width:128px;flex-shrink:0;border-left:1px solid #eee;overflow-y:auto;background:#fff}
+.sidebar-hd{font-size:10px;color:#999;padding:5px 8px;border-bottom:1px solid #eee;background:#fafafa;line-height:1.4}
+.rank-item{display:flex;align-items:center;justify-content:space-between;padding:5px 7px;border-bottom:1px solid #f5f5f5;cursor:pointer}
+.rank-item:hover{background:#fafafa}
+.ri-left{display:flex;align-items:center;gap:4px;min-width:0}
+.ri-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.ri-name{font-size:11px;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ri-val{font-size:10px;font-family:'SF Mono',monospace;white-space:nowrap;margin-left:2px}
+.statusbar{padding:3px 10px;background:#fafafa;border-top:1px solid #eee;font-size:10px;color:#999;display:flex;justify-content:space-between;flex-shrink:0}
+.loading-overlay{position:absolute;inset:0;background:rgba(255,255,255,.92);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;z-index:10}
+.loading-spin{width:28px;height:28px;border:3px solid #eee;border-top-color:#c0392b;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-txt{font-size:11px;color:#999}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <div class="title-date" id="titleDate">板块资金流向</div>
+    <div class="topbar-sub">单位：亿元 | 主力净流入累计</div>
+  </div>
+  <div class="topbar-right">
+    <span style="font-size:10px;color:#999" id="updateTime">--</span>
+    <button class="btn" onclick="refresh()">🔄 刷新</button>
+  </div>
+</div>
+
+<!-- 指标切换 -->
+<div class="grouptabs" style="border-bottom:1px solid #f0f0f0">
+  <div class="grouptab active" onclick="switchMetric('net',this)">净流入</div>
+  <div class="grouptab" onclick="switchMetric('inflow',this)">总流入</div>
+</div>
+
+<!-- 分组Tab -->
+<div class="grouptabs">
+  <div class="grouptab active" onclick="switchGroup('ai',this)">AI硬件</div>
+  <div class="grouptab" onclick="switchGroup('semi',this)">半导体</div>
+  <div class="grouptab" onclick="switchGroup('macro',this)">宏观板块</div>
+  <div class="grouptab" onclick="switchGroup('all',this)">全部</div>
+</div>
+
+<div class="main">
+  <div class="chart-col">
+    <canvas id="myCanvas"></canvas>
+    <div class="loading-overlay" id="loadingOverlay">
+      <div class="loading-spin"></div>
+      <div class="loading-txt" id="loadingTxt">正在加载分钟数据...</div>
+    </div>
+  </div>
+  <div class="sidebar">
+    <div class="sidebar-hd">板块资金流向<br><span style="color:#bbb" id="sidebarMetricLabel">主力净流入排序</span></div>
+    <div id="rankList"></div>
+  </div>
+</div>
+
+<div class="statusbar">
+  <span id="statusLeft">加载中...</span>
+  <span id="statusRight">60秒自动刷新</span>
+</div>
+
+<script>
+// ── 板块分组配置 ──
+const GROUPS = {
+  ai: [
+    {code:'BK0815',name:'AI服务器'},
+    {code:'BK0438',name:'光通信/光模块'},
+    {code:'BK0816',name:'CPO概念'},
+    {code:'BK0171',name:'PCB'},
+    {code:'BK0482',name:'铜缆高速连接'},
+    {code:'BK0141',name:'交换机'},
+    {code:'BK0574',name:'液冷散热'},
+    {code:'BK0493',name:'ASIC'},
+    {code:'BK0877',name:'GPU概念'},
+    {code:'BK0490',name:'HBM'},
+    {code:'BK0857',name:'存储芯片'},
+    {code:'BK0573',name:'先进封装'},
+    {code:'BK0567',name:'玻璃基板'},
+    {code:'BK0478',name:'机器人'},
+    {code:'BK0592',name:'MiniLED'},
+    {code:'BK0532',name:'商业航天'},
+    {code:'BK0551',name:'无人驾驶'},
+  ],
+  semi: [
+    {code:'BK0711',name:'EDA'},
+    {code:'BK0630',name:'半导体材料'},
+    {code:'BK0589',name:'半导体设备'},
+    {code:'BK0631',name:'晶圆制造'},
+    {code:'BK0858',name:'Chiplet'},
+    {code:'BK0573',name:'先进封装'},
+    {code:'BK0567',name:'玻璃基板'},
+    {code:'BK0490',name:'HBM'},
+    {code:'BK0857',name:'存储芯片'},
+    {code:'BK0901',name:'国产软件/信创'},
+    {code:'BK0438',name:'光通信模块'},
+    {code:'BK0493',name:'ASIC/半导体'},
+  ],
+  macro: [
+    {code:'BK0597',name:'创新药'},
+    {code:'BK0049',name:'消费电子'},
+    {code:'BK0029',name:'军工'},
+    {code:'BK0023',name:'证券'},
+    {code:'BK0028',name:'银行'},
+    {code:'BK0022',name:'有色金属'},
+    {code:'BK0037',name:'煤炭'},
+    {code:'BK0005',name:'电力'},
+    {code:'BK0036',name:'白酒'},
+    {code:'BK0056',name:'黄金概念'},
+    {code:'BK0080',name:'稀土永磁'},
+  ],
+};
+// 全部 = 合并去重
+GROUPS.all = Object.values(GROUPS).flat().filter((v,i,a)=>a.findIndex(x=>x.code===v.code)===i);
+
+// 颜色池（参考原图配色）
+const COLORS = [
+  '#8B0000','#c0392b','#e74c3c','#e67e22','#f39c12','#d4ac0d',
+  '#27ae60','#1e8449','#1abc9c','#148f77','#2980b9','#1a5276',
+  '#8e44ad','#6c3483','#2c3e50','#7f8c8d','#d35400','#a04000',
+  '#0097a7','#00695c','#1565c0','#283593','#4527a0','#6a1b9a',
+  '#ad1457','#880e4f','#558b2f','#33691e','#f57f17','#e65100',
+];
+
+let currentGroup = 'ai';
+let currentMetric = 'net'; // 'net' = 主力净流入, 'big' = 大单净流入
+let seriesMap = {};
+let cbN = 0;
+
+function jsonp(url) {
+  return new Promise((ok, err) => {
+    const id = '_cb' + (cbN++);
+    window[id] = d => { ok(d); delete window[id]; document.getElementById(id)?.remove(); };
+    const s = document.createElement('script');
+    s.id = id;
+    s.src = url + (url.includes('?') ? '&' : '?') + 'cb=' + id + '&_=' + Date.now();
+    s.onerror = () => { err(new Error('fail')); s.remove(); };
+    document.head.appendChild(s);
+    setTimeout(() => { if(window[id]){err(new Error('timeout'));delete window[id];s.remove();}}, 8000);
+  });
+}
+
+async function fetchSectorFlow(code) {
+  try {
+    const r = await jsonp(
+      `https://push2.eastmoney.com/api/qt/stock/fflow/kline/get?secid=90.${code}&fields1=f1,f2,f3,f4,f5&fields2=f51,f52,f53,f54,f55&klt=1&lmt=241`
+    );
+    if (!r?.data?.klines) return null;
+    const times = [], net = [], big = [];
+    r.data.klines.forEach(k => {
+      const p = k.split(',');
+      const t = p[0].substring(11,16);
+      const f52 = parseFloat(p[1]); // 主力净流入累计
+      const f55 = parseFloat(p[4]); // 大单净流入累计
+      if (!isNaN(f52)) {
+        times.push(t);
+        net.push(f52 / 1e8);
+        big.push(isNaN(f55) ? null : f55 / 1e8);
+      }
+    });
+    return times.length ? { times, net, big } : null;
+  } catch(e) { return null; }
+}
+
+// ── 绘图核心 ──
+function draw() {
+  const canvas = document.getElementById('myCanvas');
+  const W = canvas.width  = canvas.offsetWidth  * devicePixelRatio;
+  const H = canvas.height = canvas.offsetHeight * devicePixelRatio;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  const watchList = GROUPS[currentGroup];
+  const series = watchList
+    .map(w => seriesMap[w.code])
+    .filter(s => s && s[currentMetric] && s[currentMetric].length > 0)
+    .map(s => ({ ...s, values: s[currentMetric] }))
+    .sort((a, b) => (b.values[b.values.length-1]||0) - (a.values[a.values.length-1]||0));
+
+  if (!series.length) {
+    ctx.fillStyle = '#ccc';
+    ctx.font = `${13*devicePixelRatio}px system-ui`;
+    ctx.textAlign = 'center';
+    ctx.fillText('暂无数据（请在交易时段访问）', W/2, H/2);
+    return;
+  }
+
+  // 值域
+  let minV=Infinity, maxV=-Infinity;
+  series.forEach(s => s.values.forEach(v=>{if(v<minV)minV=v;if(v>maxV)maxV=v;}));
+  const padV = Math.max((maxV-minV)*0.08, 5);
+  minV -= padV; maxV += padV;
+  const range = maxV - minV || 1;
+
+  // 最长时间轴
+  let allTimes = [];
+  series.forEach(s => { if(s.times.length>allTimes.length) allTimes=s.times; });
+
+  const R = devicePixelRatio;
+  const pad = { top:14*R, right:100*R, bottom:26*R, left:50*R };
+  const cW = W - pad.left - pad.right;
+  const cH = H - pad.top  - pad.bottom;
+
+  const xOf = t => {
+    const i = allTimes.indexOf(t);
+    return i >= 0 ? pad.left + (allTimes.length>1 ? i/(allTimes.length-1)*cW : cW/2) : -1;
+  };
+  const yOf = v => pad.top + cH - ((v-minV)/range)*cH;
+  const y0 = yOf(0);
+
+  // 正负背景
+  const clampY = y => Math.max(pad.top, Math.min(pad.top+cH, y));
+  ctx.fillStyle = '#fff2f2';
+  ctx.fillRect(pad.left, pad.top, cW, clampY(y0)-pad.top);
+  ctx.fillStyle = '#f2fff5';
+  ctx.fillRect(pad.left, clampY(y0), cW, pad.top+cH-clampY(y0));
+
+  // 网格
+  const nGrid = 8;
+  for(let i=0;i<=nGrid;i++){
+    const v = minV + range/nGrid*i;
+    const y = yOf(v);
+    ctx.beginPath(); ctx.strokeStyle='rgba(0,0,0,.05)'; ctx.lineWidth=R;
+    ctx.moveTo(pad.left,y); ctx.lineTo(pad.left+cW,y); ctx.stroke();
+    ctx.fillStyle='#aaa'; ctx.font=`${8.5*R}px 'SF Mono',monospace`;
+    ctx.textAlign='right';
+    ctx.fillText(v.toFixed(0)+'亿', pad.left-3*R, y+3*R);
+  }
+
+  // 零线
+  ctx.beginPath(); ctx.strokeStyle='rgba(0,0,0,.18)'; ctx.lineWidth=1.2*R;
+  ctx.moveTo(pad.left,y0); ctx.lineTo(pad.left+cW,y0); ctx.stroke();
+
+  // X轴时间
+  const xTicks=['9:30','10:00','10:30','11:00','11:30','13:00','13:30','14:00','14:30','15:00'];
+  ctx.fillStyle='#aaa'; ctx.font=`${8*R}px system-ui`; ctx.textAlign='center';
+  xTicks.forEach(t=>{
+    const x=xOf(t); if(x<0)return;
+    ctx.fillText(t, x, H-7*R);
+    ctx.beginPath(); ctx.strokeStyle='rgba(0,0,0,.06)'; ctx.lineWidth=R;
+    ctx.moveTo(x,pad.top); ctx.lineTo(x,pad.top+cH); ctx.stroke();
+  });
+
+  // 折线 + 右侧标签（防重叠）
+  const labelPositions = [];
+  const MIN_GAP = 11 * R;
+
+  function findY(preferY) {
+    let y = preferY;
+    let tries = 0;
+    while(tries++ < 30) {
+      const conflict = labelPositions.find(ly => Math.abs(ly-y) < MIN_GAP);
+      if (!conflict) break;
+      y += MIN_GAP * (y >= conflict ? 1 : -1);
+    }
+    return Math.max(pad.top+4*R, Math.min(pad.top+cH-4*R, y));
+  }
+
+  series.forEach(s => {
+    // 构建坐标点
+    const pts = [];
+    s.times.forEach((t,i)=>{
+      const x=xOf(t);
+      if(x>=0) pts.push({x, y:yOf(s.values[i])});
+    });
+    if(pts.length<2) return;
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 1.5*R;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // 右侧标签
+    const last = pts[pts.length-1];
+    const lastVal = s.values[s.values.length-1];
+    const labelY = findY(last.y);
+    labelPositions.push(labelY);
+
+    // 连接线
+    if(Math.abs(labelY - last.y) > 2*R) {
+      ctx.beginPath();
+      ctx.strokeStyle = s.color + '60';
+      ctx.lineWidth = R*0.8;
+      ctx.setLineDash([2*R, 2*R]);
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(pad.left+cW+4*R, labelY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    ctx.fillStyle = s.color;
+    ctx.font = `${8.5*R}px system-ui`;
+    ctx.textAlign = 'left';
+    const label = `${s.name} ${lastVal>=0?'+':''}${lastVal.toFixed(2)}亿`;
+    ctx.fillText(label, pad.left+cW+6*R, labelY+3*R);
+  });
+}
+
+// ── 右侧排行 ──
+function renderRank() {
+  const watchList = GROUPS[currentGroup];
+  const series = watchList
+    .map(w => seriesMap[w.code])
+    .filter(s => s && s[currentMetric] && s[currentMetric].length > 0)
+    .map(s => ({ ...s, values: s[currentMetric] }))
+    .sort((a,b)=>(b.values[b.values.length-1]||0)-(a.values[a.values.length-1]||0));
+
+  document.getElementById('rankList').innerHTML = series.map(s=>{
+    const v = s.values[s.values.length-1]||0;
+    const isUp = v>=0;
+    return `<div class="rank-item">
+      <div class="ri-left">
+        <div class="ri-dot" style="background:${s.color}"></div>
+        <div class="ri-name" title="${s.name}">${s.name}</div>
+      </div>
+      <div class="ri-val" style="color:${isUp?'#c0392b':'#27ae60'}">${isUp?'+':''}${v.toFixed(2)}亿</div>
+    </div>`;
+  }).join('');
+}
+
+// ── 切换指标 ──
+function switchMetric(metric, el) {
+  currentMetric = metric;
+  document.querySelectorAll('.grouptabs')[0].querySelectorAll('.grouptab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('sidebarMetricLabel').textContent =
+    metric === 'net' ? '主力净流入排序' : '大单净流入排序';
+  draw();
+  renderRank();
+}
+
+// ── 切换分组 ──
+function switchGroup(group, el) {
+  currentGroup = group;
+  document.querySelectorAll('.grouptabs')[1].querySelectorAll('.grouptab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  draw();
+  renderRank();
+}
+
+// ── 主刷新 ──
+async function refresh() {
+  document.getElementById('statusLeft').textContent = '加载中...';
+  document.getElementById('loadingOverlay').style.display = 'flex';
+
+  const now = new Date();
+  document.getElementById('titleDate').textContent =
+    `${now.getMonth()+1}月${now.getDate()}日板块资金流向`;
+
+  // 获取当前分组 + 全部分组的板块（缓存复用）
+  const allWatch = GROUPS.all;
+  let loaded = 0;
+  const total = allWatch.length;
+
+  // 批量并行（限速避免被封，失败自动重试）
+  const BATCH = 5;
+  const failedCodes = [];
+
+  for(let i=0; i<allWatch.length; i+=BATCH){
+    const batch = allWatch.slice(i, i+BATCH);
+    await Promise.allSettled(batch.map(async (w) => {
+      const data = await fetchSectorFlow(w.code);
+      if(data){
+        const colorIdx = allWatch.findIndex(x=>x.code===w.code);
+        seriesMap[w.code] = {
+          code: w.code,
+          name: w.name,
+          color: COLORS[colorIdx % COLORS.length],
+          times: data.times,
+          net: data.net,
+          big: data.big,
+        };
+        loaded++;
+        document.getElementById('loadingTxt').textContent = `加载中 ${loaded}/${total}...`;
+      } else {
+        failedCodes.push(w);
+      }
+    }));
+    // 批次间稍作停顿，避免被限速
+    if (i + BATCH < allWatch.length) await new Promise(r => setTimeout(r, 300));
+  }
+
+  // 失败重试一次
+  if (failedCodes.length > 0) {
+    document.getElementById('loadingTxt').textContent = `重试 ${failedCodes.length} 个失败板块...`;
+    await Promise.allSettled(failedCodes.map(async (w) => {
+      const data = await fetchSectorFlow(w.code);
+      if(data){
+        const colorIdx = allWatch.findIndex(x=>x.code===w.code);
+        seriesMap[w.code] = {
+          code: w.code,
+          name: w.name,
+          color: COLORS[colorIdx % COLORS.length],
+          times: data.times,
+          net: data.net,
+          big: data.big,
+        };
+        loaded++;
+      }
+    }));
+  }
+
+  document.getElementById('loadingOverlay').style.display = 'none';
+  draw();
+  renderRank();
+
+  const t = now.toLocaleTimeString('zh-CN');
+  document.getElementById('updateTime').textContent = t;
+  document.getElementById('statusLeft').textContent =
+    `已加载 ${Object.keys(seriesMap).length}/${total} 个板块`;
+}
+
+window.addEventListener('resize', draw);
+refresh();
+setInterval(refresh, 60000);
+</script>
+</body>
+</html>
