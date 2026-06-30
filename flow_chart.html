@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>板块资金流向</title>
+<style>
+:root{--bg:#0a0d14;--card:#111520;--card2:#161c2a;--border:#1e2a3a;--accent:#00d4ff;--up:#ff4757;--down:#2ed573;--warn:#ffa502;--txt:#e8edf5;--txt2:#5a7290;--txt3:#8899aa}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,sans-serif;font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+/* 顶部 */
+.topbar{padding:10px 14px;background:#0d1117;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.logo{font-size:14px;font-weight:700;color:var(--accent)}.logo span{color:var(--txt2);font-size:11px;margin-left:4px;font-weight:400}
+.topbar-right{display:flex;align-items:center;gap:8px}
+.badge{font-size:10px;padding:3px 8px;border-radius:4px;background:var(--card2);color:var(--txt3);border:1px solid var(--border)}
+.btn{padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card2);color:var(--txt);font-size:11px;cursor:pointer}
+.btn.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
+/* 筛选栏 */
+.filterbar{padding:8px 12px;background:var(--card);border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0}
+.filter-btn{padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid var(--border);background:var(--card2);color:var(--txt2);white-space:nowrap}
+.filter-btn.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
+/* 主体 */
+.main{flex:1;display:flex;overflow:hidden;min-height:0}
+/* 左侧板块列表 */
+.sidebar{width:140px;flex-shrink:0;background:var(--card);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
+.sidebar-title{font-size:10px;color:var(--txt2);padding:8px 10px;border-bottom:1px solid var(--border);letter-spacing:1px;flex-shrink:0}
+.sector-item{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid rgba(30,42,58,.5);cursor:pointer;transition:.15s}
+.sector-item:hover{background:var(--card2)}
+.sector-item.selected{background:rgba(0,212,255,.08);border-left:2px solid var(--accent)}
+.sector-item.selected .si-name{color:var(--accent)}
+.si-name{font-size:11px;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70px}
+.si-flow{font-size:10px;font-family:'SF Mono',monospace;text-align:right}
+/* 右侧图表区 */
+.chart-area{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.chart-header{padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.chart-title{font-size:13px;font-weight:600}
+.chart-meta{font-size:10px;color:var(--txt3)}
+.chart-wrap{flex:1;position:relative;padding:8px;min-height:0}
+canvas{width:100%!important;height:100%!important}
+/* 底部状态 */
+.statusbar{padding:4px 12px;background:#0d1117;border-top:1px solid var(--border);font-size:10px;color:var(--txt2);display:flex;justify-content:space-between;flex-shrink:0}
+/* 加载 */
+.loading-overlay{position:absolute;inset:0;background:rgba(10,13,20,.8);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;z-index:10}
+.loading-spin{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-txt{font-size:12px;color:var(--txt3)}
+/* 图例 */
+.legend{padding:6px 12px;display:flex;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--border);flex-shrink:0;max-height:52px;overflow-y:auto}
+.legend-item{display:flex;align-items:center;gap:4px;cursor:pointer;font-size:10px;color:var(--txt2);padding:2px 4px;border-radius:3px}
+.legend-item:hover{color:var(--txt)}
+.legend-item.hidden{opacity:.3}
+.legend-dot{width:10px;height:3px;border-radius:2px;flex-shrink:0}
+/* 排行 */
+.rank-panel{display:none;flex-direction:column;padding:8px;gap:4px;overflow-y:auto}
+.rank-panel.visible{display:flex}
+.rank-row{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--card2);border-radius:6px}
+.rank-num{width:18px;font-size:10px;color:var(--txt2);font-family:'SF Mono',monospace;text-align:right}
+.rank-name{flex:1;font-size:12px}
+.rank-bar-wrap{width:80px;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.rank-bar{height:100%;border-radius:3px;transition:width .4s}
+.rank-val{width:60px;text-align:right;font-size:11px;font-family:'SF Mono',monospace}
+.rank-pct{width:40px;text-align:right;font-size:10px;color:var(--txt3)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">板块资金流向 <span>实时折线图</span></div>
+  <div class="topbar-right">
+    <span class="badge" id="updateBadge">--</span>
+    <button class="btn active" id="viewChart" onclick="setView('chart')">折线图</button>
+    <button class="btn" id="viewRank" onclick="setView('rank')">排行榜</button>
+  </div>
+</div>
+
+<div class="filterbar">
+  <div class="filter-btn active" onclick="setFilter('all',this)">全部</div>
+  <div class="filter-btn" onclick="setFilter('inflow',this)">净流入</div>
+  <div class="filter-btn" onclick="setFilter('outflow',this)">净流出</div>
+  <div class="filter-btn" onclick="setFilter('ai',this)">AI产业链</div>
+  <div class="filter-btn" onclick="clearSelected()">清除选择</div>
+</div>
+
+<div class="main">
+  <!-- 左侧板块列表 -->
+  <div class="sidebar">
+    <div class="sidebar-title">行业板块</div>
+    <div id="sectorList"></div>
+  </div>
+
+  <!-- 右侧 -->
+  <div class="chart-area">
+    <div class="chart-header">
+      <div class="chart-title" id="chartTitle">全市场主力资金净流入</div>
+      <div class="chart-meta" id="chartMeta">点击左侧板块添加到图表（最多8条）</div>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="chart-wrap" id="chartWrap">
+      <canvas id="myChart"></canvas>
+      <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spin"></div>
+        <div class="loading-txt">正在加载板块数据...</div>
+      </div>
+    </div>
+    <!-- 排行榜视图 -->
+    <div class="rank-panel" id="rankPanel"></div>
+  </div>
+</div>
+
+<div class="statusbar">
+  <span id="statusLeft">等待数据...</span>
+  <span id="statusRight">15秒自动刷新</span>
+</div>
+
+<script>
+// ── 配置 ──
+const AI_SECTORS = ['BK0493','BK0438','BK0171','BK0573','BK0490','BK0012','BK0478','BK0574','BK0482'];
+const MAX_LINES = 8;
+const MAX_POINTS = 30; // 最多保留30个时间点
+const COLORS = ['#00d4ff','#ff4757','#2ed573','#ffa502','#a29bfe','#fd79a8','#fdcb6e','#55efc4','#e17055','#74b9ff'];
+
+// ── 状态 ──
+let allSectors = [];
+let selectedCodes = new Set();
+let timeLabels = [];
+let seriesData = {}; // code -> [values...]
+let filterMode = 'all';
+let viewMode = 'chart';
+let chart = null;
+let cbN = 0;
+let firstLoad = true;
+
+// ── JSONP ──
+function jsonp(url) {
+  return new Promise((ok, err) => {
+    const id = '_cb' + (cbN++);
+    window[id] = d => { ok(d); delete window[id]; document.getElementById(id)?.remove(); };
+    const s = document.createElement('script');
+    s.id = id;
+    s.src = url + (url.includes('?') ? '&' : '?') + 'cb=' + id + '&_=' + Date.now();
+    s.onerror = () => { err(new Error('fail')); s.remove(); };
+    document.head.appendChild(s);
+  });
+}
+
+const fmtFlow = v => {
+  if (!v || v === '-') return '--';
+  const n = v / 1e8;
+  return (n >= 0 ? '+' : '') + n.toFixed(2) + '亿';
+};
+const flowColor = v => v >= 0 ? 'var(--up)' : 'var(--down)';
+
+// ── 获取全市场板块 ──
+async function fetchAllSectors() {
+  try {
+    const r = await jsonp('https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=200&po=1&np=1&fltt=2&invt=2&fid=f62&fs=m:90+t:2&fields=f12,f14,f3,f62,f184');
+    if (!r?.data?.diff) return [];
+    return r.data.diff.map(d => ({
+      code: d.f12,
+      name: d.f14,
+      pct: d.f3 / 100,
+      flow: d.f62,
+      flowPct: d.f184 / 100,
+    })).filter(s => s.code && s.name);
+  } catch(e) { return []; }
+}
+
+// ── 渲染左侧列表 ──
+function renderSidebar(sectors) {
+  let list = [...sectors];
+  if (filterMode === 'inflow')  list = list.filter(s => s.flow > 0);
+  if (filterMode === 'outflow') list = list.filter(s => s.flow < 0);
+  if (filterMode === 'ai')      list = list.filter(s => AI_SECTORS.includes(s.code));
+  list.sort((a, b) => (b.flow || 0) - (a.flow || 0));
+
+  document.getElementById('sectorList').innerHTML = list.map(s => `
+    <div class="sector-item ${selectedCodes.has(s.code) ? 'selected' : ''}"
+         onclick="toggleSector('${s.code}','${s.name.replace(/'/g,"\\'")}')">
+      <div class="si-name" title="${s.name}">${s.name}</div>
+      <div class="si-flow" style="color:${flowColor(s.flow)}">${fmtFlow(s.flow)}</div>
+    </div>`).join('');
+}
+
+// ── 渲染排行榜 ──
+function renderRank(sectors) {
+  let list = [...sectors].sort((a, b) => (b.flow || 0) - (a.flow || 0));
+  const maxAbs = Math.max(...list.map(s => Math.abs(s.flow || 0)));
+  document.getElementById('rankPanel').innerHTML = list.map((s, i) => {
+    const barW = maxAbs > 0 ? Math.abs(s.flow || 0) / maxAbs * 100 : 0;
+    const isUp = s.flow >= 0;
+    return `
+      <div class="rank-row">
+        <div class="rank-num">${i + 1}</div>
+        <div class="rank-name">${s.name}</div>
+        <div class="rank-bar-wrap"><div class="rank-bar" style="width:${barW}%;background:${isUp ? 'var(--up)' : 'var(--down)'}"></div></div>
+        <div class="rank-val" style="color:${flowColor(s.flow)}">${fmtFlow(s.flow)}</div>
+        <div class="rank-pct" style="color:${isUp ? 'var(--up)' : 'var(--down)'}">${isUp ? '+' : ''}${s.pct.toFixed(2)}%</div>
+      </div>`;
+  }).join('');
+}
+
+// ── 折线图 ──
+function initChart() {
+  const ctx = document.getElementById('myChart').getContext('2d');
+  chart = {
+    ctx,
+    datasets: [],
+    draw() {
+      const canvas = ctx.canvas;
+      const W = canvas.width = canvas.offsetWidth * devicePixelRatio;
+      const H = canvas.height = canvas.offsetHeight * devicePixelRatio;
+      ctx.clearRect(0, 0, W, H);
+
+      if (!timeLabels.length || !this.datasets.length) {
+        ctx.fillStyle = 'rgba(90,114,144,.5)';
+        ctx.font = `${14 * devicePixelRatio}px system-ui`;
+        ctx.textAlign = 'center';
+        ctx.fillText('请从左侧选择板块，或等待数据加载', W / 2, H / 2);
+        return;
+      }
+
+      const pad = { top: 20 * devicePixelRatio, right: 16 * devicePixelRatio, bottom: 36 * devicePixelRatio, left: 60 * devicePixelRatio };
+      const cW = W - pad.left - pad.right;
+      const cH = H - pad.top - pad.bottom;
+
+      // 计算值域
+      let allVals = this.datasets.flatMap(d => d.data.filter(v => v !== null));
+      if (!allVals.length) return;
+      let minV = Math.min(...allVals), maxV = Math.max(...allVals);
+      const pad_v = (maxV - minV) * 0.1 || 1e8;
+      minV -= pad_v; maxV += pad_v;
+      const range = maxV - minV || 1;
+
+      const xScale = i => pad.left + (i / (Math.max(timeLabels.length - 1, 1))) * cW;
+      const yScale = v => pad.top + cH - ((v - minV) / range) * cH;
+
+      // 零线
+      const y0 = yScale(0);
+      if (y0 >= pad.top && y0 <= pad.top + cH) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255,255,255,.12)';
+        ctx.lineWidth = devicePixelRatio;
+        ctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio]);
+        ctx.moveTo(pad.left, y0); ctx.lineTo(pad.left + cW, y0);
+        ctx.stroke(); ctx.setLineDash([]);
+      }
+
+      // 网格线
+      ctx.strokeStyle = 'rgba(30,42,58,.8)';
+      ctx.lineWidth = devicePixelRatio;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + (cH / 4) * i;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cW, y); ctx.stroke();
+        const val = maxV - (range / 4) * i;
+        ctx.fillStyle = 'rgba(90,114,144,.8)';
+        ctx.font = `${9 * devicePixelRatio}px 'SF Mono',monospace`;
+        ctx.textAlign = 'right';
+        ctx.fillText((val / 1e8).toFixed(1) + '亿', pad.left - 4 * devicePixelRatio, y + 4 * devicePixelRatio);
+      }
+
+      // X轴标签
+      const step = Math.ceil(timeLabels.length / 6);
+      ctx.fillStyle = 'rgba(90,114,144,.8)';
+      ctx.font = `${9 * devicePixelRatio}px system-ui`;
+      ctx.textAlign = 'center';
+      timeLabels.forEach((t, i) => {
+        if (i % step === 0 || i === timeLabels.length - 1) {
+          ctx.fillText(t, xScale(i), H - 8 * devicePixelRatio);
+        }
+      });
+
+      // 折线
+      this.datasets.forEach(ds => {
+        if (ds.hidden) return;
+        const pts = ds.data.map((v, i) => v !== null ? { x: xScale(i), y: yScale(v) } : null).filter(Boolean);
+        if (pts.length < 2) return;
+
+        // 渐变填充
+        const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + cH);
+        grad.addColorStop(0, ds.color + '22');
+        grad.addColorStop(1, ds.color + '00');
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) {
+          const cp1x = (pts[i-1].x + pts[i].x) / 2, cp1y = pts[i-1].y;
+          const cp2x = cp1x, cp2y = pts[i].y;
+          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, pts[i].x, pts[i].y);
+        }
+        ctx.lineTo(pts[pts.length-1].x, pad.top + cH);
+        ctx.lineTo(pts[0].x, pad.top + cH);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // 折线本体
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) {
+          const cp1x = (pts[i-1].x + pts[i].x) / 2, cp1y = pts[i-1].y;
+          const cp2x = cp1x, cp2y = pts[i].y;
+          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, pts[i].x, pts[i].y);
+        }
+        ctx.strokeStyle = ds.color;
+        ctx.lineWidth = 2 * devicePixelRatio;
+        ctx.shadowBlur = 4 * devicePixelRatio;
+        ctx.shadowColor = ds.color + '80';
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // 最后一个点高亮
+        const last = pts[pts.length-1];
+        ctx.beginPath();
+        ctx.arc(last.x, last.y, 4 * devicePixelRatio, 0, Math.PI * 2);
+        ctx.fillStyle = ds.color;
+        ctx.fill();
+        ctx.strokeStyle = '#0a0d14';
+        ctx.lineWidth = 2 * devicePixelRatio;
+        ctx.stroke();
+
+        // 最新值标注
+        const lastVal = ds.data[ds.data.length-1];
+        if (lastVal !== null) {
+          ctx.fillStyle = ds.color;
+          ctx.font = `bold ${9 * devicePixelRatio}px 'SF Mono',monospace`;
+          ctx.textAlign = 'left';
+          ctx.fillText(fmtFlow(lastVal), last.x + 6 * devicePixelRatio, last.y + 4 * devicePixelRatio);
+        }
+      });
+    }
+  };
+}
+
+function updateChart() {
+  if (!chart) return;
+  // 同步datasets
+  chart.datasets = [...selectedCodes].map((code, idx) => {
+    const existing = chart.datasets.find(d => d.code === code);
+    const color = COLORS[idx % COLORS.length];
+    return {
+      code,
+      label: allSectors.find(s => s.code === code)?.name || code,
+      color,
+      data: seriesData[code] || [],
+      hidden: existing?.hidden || false,
+    };
+  });
+  chart.draw();
+  renderLegend();
+}
+
+function renderLegend() {
+  document.getElementById('legend').innerHTML = chart.datasets.map((ds, i) => `
+    <div class="legend-item ${ds.hidden ? 'hidden' : ''}" onclick="toggleLine('${ds.code}')">
+      <div class="legend-dot" style="background:${ds.color}"></div>
+      <span>${ds.label}</span>
+    </div>`).join('');
+}
+
+function toggleLine(code) {
+  const ds = chart.datasets.find(d => d.code === code);
+  if (ds) { ds.hidden = !ds.hidden; chart.draw(); renderLegend(); }
+}
+
+// ── 选择/取消板块 ──
+function toggleSector(code, name) {
+  if (selectedCodes.has(code)) {
+    selectedCodes.delete(code);
+    delete seriesData[code];
+  } else {
+    if (selectedCodes.size >= MAX_LINES) {
+      const first = selectedCodes.values().next().value;
+      selectedCodes.delete(first);
+      delete seriesData[first];
+    }
+    selectedCodes.add(code);
+    // 补历史长度
+    seriesData[code] = new Array(timeLabels.length).fill(null);
+    // 填当前值
+    const s = allSectors.find(x => x.code === code);
+    if (s) seriesData[code][seriesData[code].length - 1] = s.flow;
+  }
+  renderSidebar(allSectors);
+  updateChart();
+  document.getElementById('chartMeta').textContent = selectedCodes.size > 0
+    ? `已选 ${selectedCodes.size} 个板块 · 最多${MAX_LINES}条`
+    : '点击左侧板块添加到图表（最多8条）';
+}
+
+function clearSelected() {
+  selectedCodes.clear();
+  seriesData = {};
+  renderSidebar(allSectors);
+  updateChart();
+}
+
+// ── 筛选 ──
+function setFilter(mode, el) {
+  filterMode = mode;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  if (mode === 'ai' && selectedCodes.size === 0) {
+    AI_SECTORS.forEach(code => {
+      const s = allSectors.find(x => x.code === code);
+      if (s && selectedCodes.size < MAX_LINES) {
+        selectedCodes.add(code);
+        seriesData[code] = new Array(timeLabels.length).fill(null);
+        if (s.flow) seriesData[code][seriesData[code].length - 1] = s.flow;
+      }
+    });
+    updateChart();
+  }
+  renderSidebar(allSectors);
+}
+
+// ── 视图切换 ──
+function setView(mode) {
+  viewMode = mode;
+  document.getElementById('viewChart').classList.toggle('active', mode === 'chart');
+  document.getElementById('viewRank').classList.toggle('active', mode === 'rank');
+  document.getElementById('chartWrap').style.display = mode === 'chart' ? 'block' : 'none';
+  document.getElementById('legend').style.display = mode === 'chart' ? 'flex' : 'none';
+  document.getElementById('rankPanel').classList.toggle('visible', mode === 'rank');
+  if (mode === 'rank') renderRank(allSectors);
+}
+
+// ── 主刷新 ──
+async function refresh() {
+  try {
+    const sectors = await fetchAllSectors();
+    if (!sectors.length) return;
+
+    allSectors = sectors;
+    const now = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    // 追加时间轴
+    timeLabels.push(now);
+    if (timeLabels.length > MAX_POINTS) timeLabels.shift();
+
+    // 追加每条折线的数据
+    sectors.forEach(s => {
+      if (!selectedCodes.has(s.code)) return;
+      if (!seriesData[s.code]) seriesData[s.code] = [];
+      seriesData[s.code].push(s.flow);
+      if (seriesData[s.code].length > MAX_POINTS) seriesData[s.code].shift();
+      // 补齐长度
+      while (seriesData[s.code].length < timeLabels.length) seriesData[s.code].unshift(null);
+    });
+
+    renderSidebar(sectors);
+    if (viewMode === 'chart') updateChart();
+    if (viewMode === 'rank') renderRank(sectors);
+
+    document.getElementById('updateBadge').textContent = now + ' 更新';
+    document.getElementById('statusLeft').textContent = `共 ${sectors.length} 个行业板块 · 已选 ${selectedCodes.size} 条`;
+
+    if (firstLoad) {
+      document.getElementById('loadingOverlay').style.display = 'none';
+      firstLoad = false;
+      // 默认自动选AI板块
+      setFilter('ai', document.querySelector('.filter-btn:nth-child(4)'));
+    }
+  } catch(e) {
+    document.getElementById('statusLeft').textContent = '加载失败: ' + e.message;
+  }
+}
+
+// ── 响应式重绘 ──
+window.addEventListener('resize', () => { if (chart) chart.draw(); });
+
+// ── 启动 ──
+initChart();
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>
